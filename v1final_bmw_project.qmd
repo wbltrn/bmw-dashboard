@@ -1,0 +1,668 @@
+---
+title: "BMW’s Electric Shift: When Did the Future Overtake the Past?"
+author: "Wili Beltran, Louis Sanchez, Ekamjot Singh"
+format:
+  html:
+    theme: cosmo
+    toc: true
+    toc-depth: 2
+    embed-resources: true
+    code-fold: false
+execute: 
+  echo: false
+  warning: false
+---
+
+# Introduction
+
+As the global auto industry moves toward electrification, BMW faces the challenge of balancing its traditional vehicle lineup with a growing electric portfolio. Using global sales data from 2018 to 2025, this project examines whether BMW has truly shifted toward electric vehicles or whether traditional models still define its core identity.
+
+#### **This project focuses on two key questions:**
+
+1.  *How does BMW’s traditional and hybrid vehicle portfolio evolve over time across regions?* And what drives traditional/hybrid BMW sales across regions?
+
+2.  *How is regional BEV share change over time?*
+
+3.  *How have electric vehicle (EV) sales evolved over time compared to gas-powered vehicles, and are EVs becoming competitive with BMW’s top-selling models?*
+
+# About Section
+
+#### ***Overview of dataset***
+
+This dataset tracks global BMW vehicle sales from 2018 to 2025, giving a monthly look at how different models perform across regions. It includes details like how many cars were sold, their average price, and total revenue, along with where they were sold and which models were involved. Beyond basic sales data, it also captures how the market is shifting by including the share of electric vehicles (BEVs) and premium models. To add more context, it brings in factors like GDP growth and fuel prices, which can influence how and why people buy cars. Overall, the dataset makes it easier to explore how BMW’s sales have changed over time and helps tell a broader story about the industry’s move toward electric vehicles.
+
+#### ***Statement of project goals***
+
+The goal of this project is to analyze how BMW’s battery electric vehicle (BEV) presence has evolved over time, with a focus on understanding the broader transition from traditional gasoline vehicles toward electrification across global markets.
+
+#### ***Key insights supported by static visualizations***
+
+```{r}
+ev_vs_total <- bmw_clean %>%
+  group_by(Date) %>%
+  summarise(
+    EV_Share = mean(BEV_Share, na.rm = TRUE),
+    Total_Sales = sum(Units_Sold, na.rm = TRUE)
+  )
+
+ggplot(ev_vs_total, aes(x = Total_Sales, y = EV_Share)) +
+  geom_point(alpha = 0.6, color = "#E64B35") +
+  geom_smooth(method = "lm", se = FALSE, color = "black") +
+  scale_y_continuous(labels = scales::percent) +
+  labs(
+    title = "EV Adoption Is Increasing Independent of Total Sales",
+    x = "Total Units Sold",
+    y = "EV Share"
+  ) +
+  theme_minimal()
+
+```
+
+```{r}
+bmw_clean %>%
+  mutate(Category = case_when(
+    Model %in% c("X3", "X5", "X7") ~ "SUV",
+    Model %in% c("3 Series", "5 Series") ~ "Sedan",
+    Model %in% c("i4", "iX") ~ "EV"
+  )) %>%
+  group_by(Category) %>%
+  summarise(total = sum(Units_Sold), .groups = "drop") %>%
+  ggplot(aes(x = Category, y = total, fill = Category)) +
+  geom_col() +
+  labs(
+    title = "BMW Sales Are Dominated by SUVs, Not Sedans",
+    x = "Category",
+    y = "Total Units Sold"
+  ) +
+  theme_minimal() +
+  theme(legend.position = "none")
+
+```
+
+```{r}
+gap_data <- bmw_clean %>%
+  filter(Model %in% c("i4", "iX", "X5")) %>%
+  group_by(Date, Model) %>%
+  summarise(units = sum(Units_Sold), .groups = "drop") %>%
+  pivot_wider(names_from = Model, values_from = units) %>%
+  mutate(
+    EV_avg = (i4 + iX) / 2,
+    gap = X5 - EV_avg
+  )
+
+ggplot(gap_data, aes(x = Date, y = gap)) +
+  geom_line(color = "#333333", size = 1.5) +
+  labs(
+    title = "The Sales Gap Between EVs and Top SUVs is Shrinking",
+    x = "Year",
+    y = "Sales Gap (Units)"
+  ) +
+  theme_minimal()
+```
+
+## Library Imports
+
+```{r setup}
+
+#| include: false
+#| message: false
+#| warning: false
+
+#| label: setup #| include: false
+
+library(tidyverse) 
+library(plotly) 
+library(lubridate) 
+library(scales)
+library(htmlwidgets)
+
+```
+
+```{r}
+tibble(
+  Loaded_Packages = search()
+) %>%
+  filter(grepl("package:", Loaded_Packages))
+```
+
+## Load & Prepare Data
+
+```{r}
+
+#| include: false
+#| message: false
+#| warning: false
+
+#| label: load-data
+
+bmw <- read_csv("bmw_global_sales_2018_2025.csv")
+
+glimpse(bmw)
+```
+
+## Clean & Classify Data
+
+#### ***Added new 'vehicle_type' column***
+
+```{r}
+
+#| message: false
+
+#| label: clean-data
+
+bmw_clean <- bmw |>
+  mutate(
+    Date = make_date(Year, Month, 1),
+    Vehicle_Type = case_when(
+      Model %in% c("i4", "iX") ~ "Electric",
+      Model %in% c("3 Series", "5 Series", "X3", "X5", "X7") ~ "Traditional",
+      TRUE ~ "Other"
+    )
+  )
+
+# Load data 
+bmw <- read_csv("bmw_global_sales_2018_2025.csv") 
+# Create a date column
+bmw <- bmw %>% 
+  mutate(Date = make_date(Year, Month, 1)) 
+# Aggregate to one value per region per month 
+bev_region_month <- bmw %>% 
+  group_by(Date, Region) %>% 
+  summarise( 
+    BEV_Share = weighted.mean(BEV_Share, Units_Sold, na.rm = TRUE),
+    Units_Sold = sum(Units_Sold, na.rm = TRUE), .groups = "drop" 
+    )
+
+
+
+bmw <- bmw %>%
+  mutate(
+    Vehicle_Type = case_when(
+      str_detect(Model, "^i") ~ "Electric",
+      TRUE ~ "Gas/Hybrid"
+    )
+  )
+
+model_sales <- bmw %>%
+  group_by(Model, Vehicle_Type) %>%
+  summarise(total_units = sum(Units_Sold, na.rm = TRUE), .groups = "drop") %>%
+  arrange(desc(total_units))
+
+top_models <- model_sales %>%
+  group_by(Vehicle_Type) %>%
+  slice_max(total_units, n = 5)
+
+other <- model_sales %>%
+  anti_join(top_models, by = c("Model", "Vehicle_Type")) %>%
+  group_by(Vehicle_Type) %>%
+  summarise(total_units = sum(total_units), .groups = "drop") %>%
+  mutate(Model = "Other")
+
+final_models <- bind_rows(top_models, other)
+
+top_focus <- final_models %>%
+  filter(Model %in% c("i4", "iX", "X7", "X5"))
+```
+
+```{r}
+bmw_clean %>%
+  distinct(Model, Vehicle_Type) %>%
+  arrange(Vehicle_Type)
+```
+
+## Check Model Categories
+
+```{r}
+
+#| include: false
+#| message: false
+#| warning: false
+
+#| label: check-models
+
+bmw_clean |>
+  count(Model, Vehicle_Type, sort = TRUE)
+```
+
+# Chart 1a: Traditional Engines
+
+```{r}
+
+#| echo: false
+
+legacy_models <- c("3 Series", "5 Series", "X3", "X5", "X7", "MINI")
+
+legacy_area <- bmw %>%
+  filter(Model %in% legacy_models) %>%
+  mutate(Date = as.Date(paste(Year, Month, "1", sep = "-"))) %>%
+  group_by(Date, Region, Model) %>%
+  summarise(
+    Units_Sold = sum(Units_Sold, na.rm = TRUE),
+    Revenue_EUR = sum(Revenue_EUR, na.rm = TRUE),
+    .groups = "drop"
+  )
+
+regions <- unique(legacy_area$Region)
+
+p_area <- plot_ly()
+
+for (r in seq_along(regions)) {
+  reg <- regions[r]
+  reg_data <- legacy_area %>% filter(Region == reg)
+
+  for (m in legacy_models) {
+    model_data <- reg_data %>% filter(Model == m)
+
+    p_area <- p_area %>%
+      add_trace(
+        data = model_data,
+        x = ~Date,
+        y = ~Units_Sold,
+        type = "scatter",
+        mode = "lines",
+        stackgroup = paste0("group", r),
+        name = m,
+        visible = ifelse(r == 1, TRUE, FALSE),
+        hovertemplate = paste0(
+          "<b>", m, "</b><br>",
+          "Region: ", reg, "<br>",
+          "Date: %{x|%b %Y}<br>",
+          "Units Sold: %{y:,}<extra></extra>"
+        )
+      )
+  }
+}
+
+n_models <- length(legacy_models)
+
+visibility_buttons <- lapply(seq_along(regions), function(i) {
+  vis <- rep(FALSE, length(regions) * n_models)
+  start <- (i - 1) * n_models + 1
+  end <- i * n_models
+  vis[start:end] <- TRUE
+
+  list(
+    method = "update",
+    args = list(
+      list(visible = vis),
+      list(title = paste("Traditional/Hybrid BMW Portfolio in", regions[i]))
+    ),
+    label = regions[i]
+  )
+})
+
+p_area <- p_area %>%
+  layout(
+    title = paste("Traditional/Hybrid BMW Portfolio in", regions[1]),
+    xaxis = list(title = "Date", rangeslider = list(visible = TRUE)),
+    yaxis = list(title = "Units Sold"),
+    updatemenus = list(
+      list(
+        buttons = visibility_buttons,
+        direction = "down",
+        x = 1.02,
+        y = 1,
+        xanchor = "left",
+        yanchor = "top"
+      )
+    ),
+    legend = list(title = list(text = "Model"))
+  )
+
+p_area
+```
+
+##### How does BMW’s traditional and hybrid vehicle portfolio evolve over time across regions?
+
+## Interpretation
+
+This visualization shows how BMW’s traditional and hybrid models contribute to total sales over time in a selected region (China). Each layer represents a model, combining to show total monthly sales.
+
+The chart suggests that BMW’s legacy lineup remains stable from 2018 to 2025, with models like the X5, X3, and MINI driving a large share of sales. While there are monthly fluctuations, the overall portfolio stays balanced, with no single model dominating.
+
+There is also a slight upward trend in total sales, indicating that demand for traditional and hybrid vehicles remains resilient despite the shift toward electric vehicles.
+
+# Chart 1b: Combination Factors in Traditional/Hybrid Vehicles
+
+```{r}
+#| echo: false
+
+legacy_models <- c("3 Series", "5 Series", "X3", "X5", "X7", "MINI")
+
+regions <- unique(bmw$Region)
+
+p_parallel <- plot_ly()
+
+for (r in seq_along(regions)) {
+  
+  reg <- regions[r]
+  
+  legacy_parallel <- bmw %>%
+    filter(Model %in% legacy_models, Region == reg) %>%
+    drop_na(Units_Sold, Avg_Price_EUR, Revenue_EUR, Fuel_Price_Index, GDP_Growth) %>%
+    mutate(Revenue_Millions = Revenue_EUR / 1e6)
+  
+  p_parallel <- p_parallel %>%
+    add_trace(
+      type = "parcoords",
+      visible = if (r == 1) TRUE else FALSE,
+      line = list(
+        color = legacy_parallel$Units_Sold,
+        colorscale = "Viridis",
+        showscale = TRUE,
+        colorbar = list(title = "Units Sold")
+      ),
+      dimensions = list(
+        list(
+          label = "Units Sold",
+          values = legacy_parallel$Units_Sold
+        ),
+        list(
+          label = "Avg Price (€)",
+          values = legacy_parallel$Avg_Price_EUR
+        ),
+        list(
+          label = "Revenue (€M)",
+          values = legacy_parallel$Revenue_Millions
+        ),
+        list(
+          label = "Fuel Price Index",
+          values = legacy_parallel$Fuel_Price_Index
+        ),
+        list(
+          label = "GDP Growth",
+          values = legacy_parallel$GDP_Growth
+        )
+      ),
+      name = reg
+    )
+}
+
+buttons <- lapply(seq_along(regions), function(i) {
+  vis <- rep(FALSE, length(regions))
+  vis[i] <- TRUE
+  
+  list(
+    method = "update",
+    args = list(
+      list(visible = vis),
+      list(title = list(text = paste("What Drives Traditional/Hybrid BMW Sales in", regions[i], "?")))
+    ),
+    label = regions[i]
+  )
+})
+
+p_parallel <- p_parallel %>%
+  layout(
+    title = list(text = paste("What Drives Traditional/Hybrid BMW Sales in", regions[1], "?")),
+    font = list(size = 12),
+    updatemenus = list(
+      list(
+        buttons = buttons,
+        direction = "down",
+        x = 1.05,
+        y = 1,
+        xanchor = "left",
+        yanchor = "top"
+      )
+    )
+  )
+
+p_parallel
+```
+
+## Interpretation
+
+This parallel coordinates plot shows how multiple factors relate to sales of BMW’s traditional and hybrid models in Europe. Each line represents an observation, with axes for units sold, price, revenue, fuel prices, and GDP growth. Coloring by units sold helps highlight which combinations are associated with stronger performance.
+
+Higher sales generally align with higher revenue, while the relationship with price is more mixed, suggesting strong sales occur across different price points. Fuel prices and GDP growth also vary, indicating that sales are influenced by multiple factors rather than a single driver.
+
+The chart’s interactivity allows users to filter ranges on any axis, making it easier to isolate patterns, such as periods of high sales or specific economic conditions, and see how they relate across all variables.
+
+## Complementary
+
+These two visualizations are not directly correlated but are designed to complement each other. The stacked area chart shows how traditional and hybrid vehicle sales evolve over time, while the parallel coordinates plot explores the factors associated with those sales levels. By selecting the same region in both charts, users can connect observed trends in sales with underlying economic and market conditions.
+
+# Chart 2a : BEV Share Over Time by Region
+
+```{r id="j3v9tq"}
+regions <- unique(bev_region_month$Region)
+
+fig <- plot_ly()
+
+for (r in regions) {
+  bmw_r <- bev_region_month %>% filter(Region == r)
+  
+  fig <- fig %>%
+    add_trace(
+      data = bmw_r,
+      x = ~Date,
+      y = ~BEV_Share,     
+      type = "scatter",
+      mode = "lines+markers",
+      name = r,
+      visible = TRUE,
+      customdata = ~Units_Sold,
+      hovertemplate = paste(
+        "<b>Region:</b> ", r, "<br>",
+        "<b>Date:</b> %{x|%b %Y}<br>",
+        "<b>Average BEV Share:</b> %{y:.1f}%<br>",
+        "<b>BEV Units Sold:</b> %{customdata:,}<extra></extra>"
+      )
+    )
+}
+
+visibility_list <- lapply(seq_along(regions), function(i) {
+  vis <- rep(FALSE, length(regions))
+  vis[i] <- TRUE
+  vis
+})
+
+all_visible <- rep(TRUE, length(regions))
+
+buttons <- c(
+  list(
+    list(
+      method = "update",
+      args = list(
+        list(visible = all_visible),
+        list(title = "Regional BEV Share Over Time - All Regions")
+      ),
+      label = "All Regions"
+    )
+  ),
+  lapply(seq_along(regions), function(i) {
+    list(
+      method = "update",
+      args = list(
+        list(visible = visibility_list[[i]]),
+        list(title = paste("Regional BEV Share Over Time -", regions[i]))
+      ),
+      label = regions[i]
+    )
+  })
+)
+
+fig <- fig %>%
+  layout(
+    title = "Regional BEV Share Over Time - All Regions",
+    xaxis = list(
+      title = "Time",
+      range = c(as.Date("2018-01-01"), as.Date("2025-12-31")),
+      rangeslider = list(visible = TRUE)
+    ),
+    yaxis = list(
+      title = "Average BEV Share (%)",
+      ticksuffix = "%"
+    ),
+    legend = list(
+      title = list(text = "Region")
+    ),
+    updatemenus = list(
+      list(
+        type = "dropdown",
+        active = 0,
+        buttons = buttons,
+        x = 1.02,
+        y = 1.15
+      )
+    )
+  )
+
+fig
+
+
+```
+
+## Interpretation
+
+This graph shows a steady and consistent increase in BEV share across all regions from 2018 to 2025, indicating a clear shift toward electric vehicles over time. Each region follows a nearly identical upward trend, with noticeable step-like increases at the start of each year, suggesting structured or cumulative growth rather than random fluctuation. While there are small variations between regions, none significantly diverge, implying that BEV adoption is happening at a similar pace globally rather than being driven by a single dominant market. Overall, the chart suggests that BMW’s electric vehicle presence is expanding uniformly across regions, reflecting a coordinated transition toward electrification rather than isolated regional changes.
+
+# Chart 2b : In depth BEV Share Dec - Jan
+
+```{r}
+library(dplyr)
+library(ggplot2)
+library(lubridate)
+
+# Build Dec -> Jan change table (safe version)
+dec_data <- bev_region_month %>%
+  mutate(
+    Year_Num = year(Date),
+    Month_Num = month(Date)
+  ) %>%
+  filter(Month_Num == 12) %>%
+  transmute(
+    Region,
+    Base_Year = Year_Num,
+    December_BEV = BEV_Share
+  )
+
+jan_data <- bev_region_month %>%
+  mutate(
+    Year_Num = year(Date),
+    Month_Num = month(Date)
+  ) %>%
+  filter(Month_Num == 1) %>%
+  transmute(
+    Region,
+    Base_Year = Year_Num - 1,
+    January_BEV = BEV_Share
+  )
+
+dec_jan_compare <- dec_data %>%
+  inner_join(jan_data, by = c("Region", "Base_Year")) %>%
+  mutate(
+    Dec_to_Jan_Change = January_BEV - December_BEV
+  )
+
+# Plot the jump each year
+ggplot(dec_jan_compare, aes(x = Base_Year, y = Dec_to_Jan_Change, color = Region)) +
+  geom_line() +
+  geom_point() +
+  labs(
+    title = "December to January Change in BEV Share",
+    x = "Year (December → January)",
+    y = "Change in BEV Share (%)"
+  ) +
+  theme_minimal()
+```
+
+## Interpretation
+
+This graph shows a steady and consistent increase in BEV share across all regions from 2018 to 2025, indicating a clear shift toward electric vehicles over time. Each region follows a nearly identical upward trend, with noticeable step-like increases at the start of each year, suggesting structured or cumulative growth rather than random fluctuation. While there are small variations between regions, none significantly diverge, implying that BEV adoption is happening at a similar pace globally rather than being driven by a single dominant market. Overall, the chart suggests that BMW’s electric vehicle presence is expanding uniformly across regions, reflecting a coordinated transition toward electrification rather than isolated regional changes.
+
+# Chart 3: How have electric vehicle (EV) sales evolved over time compared to gas-powered vehicles, and are EVs becoming competitive with BMW’s top-selling models?
+
+```{r}
+# Fix units
+bmw <- bmw %>%
+  mutate(Units_Sold = Units_Sold * 1000)
+
+# Create EV vs Gas trend
+ev_vs_gas <- bmw %>%
+  filter(Model %in% c("i4", "iX", "X5", "X7")) %>%
+  group_by(Year, Vehicle_Type) %>%
+  summarise(avg_units = mean(Units_Sold, na.rm = TRUE), .groups = "drop")
+
+# Base ggplot
+p_main <- ggplot(
+  ev_vs_gas,
+  aes(
+    x = Year,
+    y = avg_units,
+    color = Vehicle_Type,
+    group = Vehicle_Type,
+    text = paste(
+      "<b>Year:</b>", Year,
+      "<br><b>Type:</b>", Vehicle_Type,
+      "<br><b>Sales:</b>", round(avg_units / 1e6, 2), "M"
+    )
+  )
+) +
+  geom_line(linewidth = 2.2) +
+  geom_point(size = 3.5) +
+  geom_smooth(
+    aes(x = Year, y = avg_units, color = Vehicle_Type),
+    se = FALSE,
+    linetype = "dashed",
+    linewidth = 1,
+    inherit.aes = FALSE
+  ) +
+  scale_y_continuous(
+    labels = label_number(scale = 1e-6, suffix = "M")
+  ) +
+  scale_color_manual(values = c(
+    "Electric" = "#E64B35",
+    "Gas/Hybrid" = "#4DBBD5"
+  )) +
+  labs(
+    x = "Year",
+    y = "Average Units Sold (Millions)",
+    color = "Vehicle Type"
+  ) +
+  theme_minimal(base_size = 11) +
+  theme(
+    legend.position = "right",
+    plot.title = element_blank()
+  )
+
+# Convert to interactive
+ggplotly(p_main, tooltip = "text") %>%
+  layout(
+    font = list(size = 12),
+    title = list(
+      text = "<b>Electric Models Are Catching Up to BMW’s Top SUVs</b>",
+      x = 0.5,
+      xanchor = "center",
+      font = list(size = 18)
+    ),
+    margin = list(t = 70, b = 50, l = 70, r = 110),
+    legend = list(
+      orientation = "v",
+      x = 1.02,
+      y = 1,
+      xanchor = "left",
+      yanchor = "top",
+      title = list(text = "Vehicle Type")
+    ),
+    xaxis = list(
+      title = "Year",
+      rangeslider = list(visible = TRUE),
+      rangeselector = list(
+        buttons = list(
+          list(count = 3, label = "Last 3Y", step = "year", stepmode = "backward"),
+          list(count = 5, label = "Last 5Y", step = "year", stepmode = "backward"),
+          list(step = "all", label = "All")
+        )
+      )
+    ),
+    yaxis = list(
+      title = "Average Units Sold (Millions)"
+    )
+  )
+```
+
+## Interpretation
+
+This chart shows the upward trend in electric vehicle sales over time, while gas and hybrid models grow at a slower and more consistent pace. IN earlier years EV sales were much noticeable lower than gas powered SUVs, but this gap narrows and becomes more smaller in the recent years. When you interactive with the chart, especially the range slider, we can zoom more into the recent time periods and see a quick pick up for EV around 2022, which bring them closer or even closer to matching the gas model performance. When you hover, this feature allows for comparison of the values year per year, which makes it easier to see how quickly the EV model sales are going up. Overall, the visualization show shows that EV's are no longer niche but are more competitive with BMW's top selling gas models.

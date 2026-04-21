@@ -1,0 +1,46 @@
+---
+title: "DS2003-Project3-RoughSketch"
+author: "Wili Beltran"
+date: "2026-03-30"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r}
+library(tidyverse)
+```
+
+```{r}
+df <- read.csv("/Users/wilibeltran/Desktop/CourseFolders/DS2003/Project3/bmw_global_sales_2018_2025.csv")
+
+head(df)
+```
+
+```{r}
+df_summary <- df %>%
+  group_by(Year, Region) %>%
+  summarise(Units_Sold = sum(Units_Sold), .groups = "drop")
+```
+
+```{r}
+ggplot(df_summary, aes(x = Year, y = Units_Sold, color = Region)) +
+  geom_line(size = 1.2) +
+  geom_point() +
+  labs(
+    title = "BMW Sales Over Time by Region",
+    x = "Year",
+    y = "Units Sold",
+    color = "Region"
+  ) +
+  theme_minimal()
+```
+
+```{r}
+df_summary %>%
+  filter(Region %in% c("Europe", "USA")) %>%
+  ggplot(aes(x = Year, y = Units_Sold, color = Region)) +
+  geom_line()
+```
